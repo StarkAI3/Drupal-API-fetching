@@ -1,0 +1,4 @@
+requests
+pinecone-client
+openai 
+sentence-transformers 
