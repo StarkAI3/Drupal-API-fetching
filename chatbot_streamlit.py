@@ -24,7 +24,8 @@ if submit and user_query.strip():
                 data = response.json()
                 answer = data.get('answer', '')
                 lang = data.get('language', 'en')
-                st.session_state['history'].append((user_query, answer, lang))
+                direct_circular = data.get('direct_circular', None)
+                st.session_state['history'].append((user_query, answer, lang, direct_circular))
             else:
                 st.error(f"Error: {response.status_code} - {response.text}")
         except Exception as e:
@@ -32,7 +33,9 @@ if submit and user_query.strip():
 
 st.markdown("---")
 st.subheader("Conversation History")
-for i, (q, a, lang) in enumerate(reversed(st.session_state['history'])):
+for i, (q, a, lang, direct_circular) in enumerate(reversed(st.session_state['history'])):
     st.markdown(f"**You ({'Marathi' if lang == 'mr' else 'English'}):** {q}")
+    if direct_circular:
+        st.markdown(f"**Direct Circular Match:**\n{direct_circular}")
     st.markdown(f"**Bot:** {a}")
     st.markdown("---") 

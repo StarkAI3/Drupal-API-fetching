@@ -10,7 +10,7 @@ def get_model():
     global _model
     if _model is None:
         configure(api_key=genai_api_key)
-        _model = GenerativeModel('gemini-1.5-flash')
+        _model = GenerativeModel('gemini-2.5-pro')
     return _model
 
 def generate_gemini_response(prompt):
