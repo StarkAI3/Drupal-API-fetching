@@ -1,0 +1,73 @@
+import os
+from dotenv import load_dotenv
+load_dotenv()
+import re
+from fastapi import FastAPI
+from pydantic import BaseModel
+from embeddings import get_embedding
+from pinecone_utils import search_vectors
+from gemini_utils import generate_gemini_response
+from language_utils import detect_language
+import multiprocessing
+from multiprocessing.pool import ApplyResult
+
+app = FastAPI()
+
+class ChatRequest(BaseModel):
+    query: str
+
+def extract_link(text):
+    urls = re.findall(r'https?://\S+', text)
+    return urls[0] if urls else None
+
+def search_context(query, top_k=5):
+    embedding = get_embedding(query)
+    res = search_vectors(embedding, top_k=top_k)
+    # If res is an ApplyResult from multiprocessing, call .get() with no arguments
+    if isinstance(res, ApplyResult):
+        res = res.get()
+    results = []
+    for match in res['matches']:
+        meta = match['metadata']
+        text = meta.get('text', '')
+        link = extract_link(text)
+        results.append({
+            'id': match['id'],
+            'score': match['score'],
+            'text': text,
+            'content_type': meta.get('content_type', ''),
+            'link': link
+        })
+    return results
+
+def compose_prompt(user_query, context_results, lang):
+    context_str = ''
+    for i, ctx in enumerate(context_results):
+        context_str += f"[{i+1}] {ctx['text']}\n"
+        if ctx['link']:
+            context_str += f"Link: {ctx['link']}\n"
+    if lang == 'mr':
+        prompt = f"तुम्ही PMC वेबसाइटसाठी एक माहितीपूर्ण सहाय्यक आहात. वापरकर्त्याचा प्रश्न: '{user_query}'\n\nसंदर्भ:\n{context_str}\n\nवरील संदर्भ वापरून, वापरकर्त्याच्या प्रश्नाचे उत्तर मराठीत द्या. शक्य असल्यास, संबंधित लिंक उत्तरात समाविष्ट करा."
+    else:
+        prompt = f"You are an informative assistant for the PMC website. User's question: '{user_query}'\n\nContext:\n{context_str}\n\nUsing the above context, answer the user's question in English. If possible, include the relevant link in your answer."
+    return prompt
+
+@app.post('/chat')
+async def chat(request: ChatRequest):
+    user_query = request.query.strip()
+    lang = detect_language(user_query)
+    context_results = search_context(user_query, top_k=5)
+    prompt = compose_prompt(user_query, context_results, lang)
+    answer = generate_gemini_response(prompt)
+    for ctx in context_results:
+        if ctx['link'] and ctx['link'] not in answer:
+            if lang == 'mr':
+                answer += f"\n\nलिंक: {ctx['link']}"
+            else:
+                answer += f"\n\nLink: {ctx['link']}"
+            break
+    return {"answer": answer, "language": lang}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("chatbot_server:app", host="0.0.0.0", port=8000, reload=True) 

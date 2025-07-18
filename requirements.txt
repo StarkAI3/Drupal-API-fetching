@@ -1,4 +1,9 @@
+fastapi
+uvicorn
+streamlit
 requests
+python-dotenv
 pinecone-client
-openai 
-sentence-transformers 
+sentence-transformers
+google-generativeai
+pydantic 
