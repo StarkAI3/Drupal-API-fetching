@@ -93,6 +93,62 @@ def store_in_pinecone(content, content_type):
         index.upsert(vectors)
     print(f"Upserted {len(vectors)} {content_type} items to Pinecone.")
 
+def clean_metadata(meta):
+    # Remove keys with None/null values
+    return {k: v for k, v in meta.items() if v is not None}
+
+def reindex_all_data():
+    import glob
+    import time
+    # Clear the index first
+    print("Deleting all vectors from Pinecone index...")
+    pc.Index(INDEX_NAME).delete(delete_all=True)
+    print("Index cleared. Re-indexing...")
+    
+    # For each content type, load the JSON and upsert with full metadata
+    for content_type in CONTENT_TYPES:
+        filepath = os.path.join(DATA_DIR, f"{content_type}.json")
+        if not os.path.exists(filepath):
+            print(f"File not found: {filepath}")
+            continue
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        print(f"Indexing {len(data)} items from {filepath}...")
+        vectors = []
+        for item in data:
+            # Compose the text for embedding (use title + text if available)
+            text = item.get('title', '')
+            if 'text' in item:
+                text += '\n' + item['text']
+            elif 'description' in item:
+                text += '\n' + item['description']
+            # Generate embedding
+            embedding = model.encode(text).tolist()
+            # Prepare metadata, excluding nulls
+            meta = clean_metadata({
+                'text': text,
+                'file': item.get('file'),
+                'title': item.get('title'),
+                'display_date': item.get('display_date'),
+                'nid': item.get('nid'),
+                'content_type': content_type,
+                'department': item.get('department'),
+                'url': item.get('url'),
+                'external_link': item.get('external_link'),
+                'link': item.get('link'),
+                # Add more fields as needed
+            })
+            vectors.append((str(item.get('nid', item.get('id', 'unknown'))), embedding, meta))
+            # Upsert in batches of 100
+            if len(vectors) >= 100:
+                pc.Index(INDEX_NAME).upsert(vectors)
+                vectors = []
+        if vectors:
+            pc.Index(INDEX_NAME).upsert(vectors)
+        print(f"Finished indexing {filepath}.")
+        time.sleep(1)  # Avoid rate limits
+    print("Re-indexing complete.")
+
 def main():
     for content_type in CONTENT_TYPES:
         print(f"Processing content type: {content_type}")
@@ -118,4 +174,8 @@ def main():
         store_in_pinecone(new_items, content_type)
 
 if __name__ == "__main__":
-    main() 
+    import sys
+    if len(sys.argv) > 1 and sys.argv[1] == "reindex":
+        reindex_all_data()
+    else:
+        main() 
